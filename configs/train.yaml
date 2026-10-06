@@ -1,0 +1,20 @@
+data:
+  corpus: scnwiki.txt
+  max_tokens: 200000  # -1 = all; keeps this in-memory lesson manageable
+  min_count: 3
+  max_words: 10000
+  window: 2
+
+model:
+  architecture: cbow # skipgram or cbow
+  dimensions: 25
+  loss: negative # negative or softmax
+  negatives: 10
+
+training:
+  epochs: 20
+  batch_size: 1024
+  lr: 0.005
+  seed: 1
+
+output: vectors.pt

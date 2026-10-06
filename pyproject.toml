@@ -1,0 +1,14 @@
+[build-system]
+requires = ["setuptools>=64"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "w2vlab"
+version = "0.1.0"
+description = "A small, teachable word2vec implementation"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = ["torch>=2.3", "mwparserfromhell>=0.6", "yaml-config-manager>=0.2.1", "matplotlib>=3.7"]
+
+[tool.setuptools.packages.find]
+where = ["src"]

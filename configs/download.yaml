@@ -1,0 +1,4 @@
+source: wiki               # wiki or alice
+language: scn              # Wikipedia language code
+articles: -1               # -1 = all; positive number = limit
+output: scnwiki.txt

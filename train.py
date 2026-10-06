@@ -1,127 +1,82 @@
-#!/usr/bin/env python3
-"""
-Word2Vec Training Script (Template)
-Most utility code is provided. Core logic must be implemented during the lesson.
-"""
+"""Train word2vec with an explicit YAML config."""
+
+import sys
+import time
+from pathlib import Path
+
 import torch
-import torch.nn as nn
-import torch.nn.functional as F
 from torch.utils.data import DataLoader
-from datasets import load_dataset
-import argparse
-from tqdm import tqdm
-import os
+from yaml_config_manager import load_config
 
-from dataset_classes import (
-    build_vocabulary, 
-    create_skipgram_pairs, 
-    create_cbow_pairs,
-    Word2VecDataset,
-    NegativeSampler
-)
-from model_classes import SkipGramModel, CBOWModel
+from w2vlab.data import Vocabulary, make_pairs, tokenize
+from w2vlab.model import NegativeSampler, Word2Vec
 
 
-def train_word2vec(model, dataloader, negative_sampler, epochs=5, lr=0.001, 
-                   use_negative_sampling=True, num_negative=5, device='cpu'):
-    """
-    Main training function.
-    """
-    raise NotImplementedError("Implement the training loop for Word2Vec. Hint: see the original repo for optimizer, loss, and batching logic.")
+def train(config):
+    data, model_config, fit = config.data, config.model, config.training
+    if model_config.loss not in ("negative", "softmax"):
+        raise ValueError("model.loss must be negative or softmax")
+    sizes = (data.window, data.min_count, data.max_words, model_config.dimensions,
+             model_config.negatives, fit.epochs, fit.batch_size)
+    if min(sizes) < 1 or fit.lr <= 0 or data.max_tokens == 0 or data.max_tokens < -1:
+        raise ValueError("sizes and learning rate must be positive; max_tokens may be -1")
 
+    torch.manual_seed(fit.seed)
+    tokens = tokenize(Path(data.corpus).read_text(encoding="utf-8"))
+    if data.max_tokens > 0:
+        tokens = tokens[:data.max_tokens]
+    vocab = Vocabulary(tokens, data.min_count, data.max_words)
+    pairs = make_pairs(vocab.encode(tokens), data.window, model_config.architecture)
+    if len(vocab.words) < 3 or not pairs:
+        raise ValueError("corpus is too small; try more text or lower data.min_count")
 
-def save_model(model, word2idx, idx2word, word_frequencies, filepath):
-    """Save trained model and vocabulary"""
-    model_data = {
-        'model_state_dict': model.state_dict(),
-        'vocab_size': model.vocab_size,
-        'embed_dim': model.embed_dim,
-        'model_type': 'skipgram' if isinstance(model, SkipGramModel) else 'cbow',
-        'word2idx': word2idx,
-        'idx2word': idx2word,
-        'word_frequencies': word_frequencies,
-        'embeddings': model.get_word_embeddings().cpu().numpy()
-    }
-    torch.save(model_data, filepath)
-    print(f"Model saved to {filepath}")
+    model = Word2Vec(len(vocab.words), model_config.dimensions, model_config.architecture)
+    sampler = NegativeSampler(vocab.counts) if model_config.loss == "negative" else None
+    loader = DataLoader(pairs, batch_size=fit.batch_size, shuffle=True)
+    optimizer = torch.optim.Adam(model.parameters(), lr=fit.lr)
 
+    source, target = pairs[0]
+    example = ([vocab.words[i] for i in source] if model_config.architecture == "cbow"
+               else vocab.words[source])
+    print(f"{model_config.architecture} / {model_config.loss}: {len(tokens)} tokens, "
+          f"{len(vocab.words)} words, {len(pairs)} examples")
+    print(f"Example: {example} -> {vocab.words[target]}")
+    print(f"W1 input and W2 output: {tuple(model.input.weight.shape)} each")
 
-def main():
-    parser = argparse.ArgumentParser(description='Educational Word2Vec Training')
-    parser.add_argument('--model_type', choices=['skipgram', 'cbow'], default='skipgram', help='Model architecture to use')
-    parser.add_argument('--embed_dim', type=int, default=100, help='Embedding dimension')
-    parser.add_argument('--window_size', type=int, default=2, help='Context window size')
-    parser.add_argument('--dataset_name', type=str, default='wikimedia/wikipedia', help='HuggingFace dataset name (default: wikimedia/wikipedia)')
-    parser.add_argument('--dataset_config', type=str, default='20231101.it', help='HuggingFace dataset configuration (default: 20231101.it)')
-    parser.add_argument('--dataset_text_field', type=str, default='text', help='Field name in the dataset containing the text (default: text)')
-    parser.add_argument('--min_freq', type=int, default=5, help='Minimum word frequency')
-    parser.add_argument('--max_vocab', type=int, default=50000, help='Maximum vocabulary size')
-    parser.add_argument('--max_texts', type=int, default=None, help='Maximum number of texts to process')
-    parser.add_argument('--epochs', type=int, default=5, help='Number of training epochs')
-    parser.add_argument('--batch_size', type=int, default=256, help='Batch size')
-    parser.add_argument('--lr', type=float, default=0.001, help='Learning rate')
-    parser.add_argument('--negative_sampling', action='store_true', default=True, help='Use negative sampling (default: True)')
-    parser.add_argument('--no_negative_sampling', action='store_true', help='Disable negative sampling, use full softmax instead')
-    parser.add_argument('--num_negative', type=int, default=5, help='Number of negative samples per positive example')
-    parser.add_argument('--output_dir', type=str, default='models', help='Directory to save the trained model')
-    args = parser.parse_args()
-    if args.no_negative_sampling:
-        args.negative_sampling = False
-    os.makedirs(args.output_dir, exist_ok=True)
-    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-    print(f"Using device: {device}")
-    print(f"Loading {args.dataset_name} dataset - {args.dataset_config}...")
-    try:
-        dataset = load_dataset(args.dataset_name, args.dataset_config, split="train")
-        print(f"Dataset loaded: {len(dataset)} articles")
-    except Exception as e:
-        print(f"Error loading dataset: {e}")
-        return
-    print(f"Extracting texts (max {args.max_texts})...")
-    texts = []
-    for i, example in enumerate(tqdm(dataset)):
-        if args.max_texts is not None and i >= args.max_texts:
-            break
-        if example[args.dataset_text_field] and len(example[args.dataset_text_field].strip()) > 50:
-            texts.append(example[args.dataset_text_field])
-    print(f"Extracted {len(texts)} texts")
-    word2idx, idx2word, word_frequencies = build_vocabulary(texts, args.min_freq, args.max_vocab)
-    vocab_size = len(word2idx)
-    if vocab_size == 0:
-        print("Error: Empty vocabulary")
-        return
-    if args.model_type == 'skipgram':
-        pairs = create_skipgram_pairs(texts, word2idx, args.window_size)
-        model = SkipGramModel(vocab_size, args.embed_dim)
-    else:
-        pairs = create_cbow_pairs(texts, word2idx, args.window_size)
-        model = CBOWModel(vocab_size, args.embed_dim)
-    if len(pairs) == 0:
-        print("Error: No training pairs created")
-        return
-    dataset = Word2VecDataset(pairs)
-    dataloader = DataLoader(dataset, batch_size=args.batch_size, shuffle=True, num_workers=0)
-    negative_sampler = None
-    if args.negative_sampling:
-        negative_sampler = NegativeSampler(vocab_size, word_frequencies)
-    print("Starting training...")
-    train_word2vec(
-        model=model,
-        dataloader=dataloader, 
-        negative_sampler=negative_sampler,
-        epochs=args.epochs,
-        lr=args.lr,
-        use_negative_sampling=args.negative_sampling,
-        num_negative=args.num_negative,
-        device=device
-    )
-    suffix = "neg" if args.negative_sampling else "softmax"
-    model_path = os.path.join(args.output_dir, f'word2vec_{args.model_type}_{args.embed_dim}d_{suffix}.pth')
-    save_model(model, word2idx, idx2word, word_frequencies, model_path)
-    print("\nTraining completed!")
-    print(f"Final model saved to: {model_path}")
-    print(f"Vocabulary size: {vocab_size}")
-    print(f"Embedding dimension: {args.embed_dim}")
+    first_batch = True
+    for epoch in range(fit.epochs):
+        total = seen = 0
+        started = time.perf_counter()
+        for step, (source, target) in enumerate(loader, 1):
+            if model_config.architecture == "cbow":
+                source = torch.stack(source, dim=1)  # DataLoader transposes nested lists.
+            negatives = sampler.sample(target, model_config.negatives) if sampler else None
+            if first_batch:
+                scores = (f"positive {(len(target),)}, negative {tuple(negatives.shape)}"
+                          if negatives is not None else f"softmax {(len(target), len(vocab.words))}")
+                print(f"First batch: source {tuple(source.shape)} -> hidden "
+                      f"{(len(target), model_config.dimensions)} -> scores {scores}")
+                first_batch = False
+            loss = model(source, target, negatives)
+            optimizer.zero_grad()
+            loss.backward()
+            optimizer.step()
+            total += loss.item() * len(target)
+            seen += len(target)
+            if sys.stdout.isatty() and (step % max(1, len(loader) // 30) == 0 or step == len(loader)):
+                filled = round(24 * step / len(loader))
+                print(f"\repoch {epoch + 1} [{'#' * filled}{'.' * (24 - filled)}] "
+                      f"{step}/{len(loader)} loss {total / seen:.3f}", end="", flush=True)
+        if sys.stdout.isatty():
+            print()
+        print(f"epoch {epoch + 1}: loss {total / len(pairs):.3f} "
+              f"({time.perf_counter() - started:.1f}s)")
+
+    torch.save({"words": vocab.words, "vectors": model.input.weight.detach()}, config.output)
+    print(f"Saved {config.output}")
+
 
 if __name__ == "__main__":
-    main()
+    if not any(arg == "--config" or arg.startswith("--config=") for arg in sys.argv[1:]):
+        raise SystemExit("Error: --config is required. Example: python train.py --config configs/train.yaml")
+    train(load_config())

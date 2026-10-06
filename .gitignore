@@ -1,0 +1,9 @@
+/alice.txt
+/*wiki.txt
+/*.pt
+/src/*.egg-info/
+/build/
+/vectors.png
+__pycache__/
+.pytest_cache/
+corpora/tmpa_9vayzi/
