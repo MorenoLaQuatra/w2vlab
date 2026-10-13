@@ -12,6 +12,16 @@ from w2vlab.data import Subwords, Vocabulary, make_pairs, tokenize
 from w2vlab.model import FastText, NegativeSampler, Word2Vec
 
 
+def read_tokens(path, limit):
+    tokens = []
+    with Path(path).open(encoding="utf-8") as corpus:
+        for line in corpus:
+            tokens.extend(tokenize(line))
+            if limit > 0 and len(tokens) >= limit:
+                return tokens[:limit]
+    return tokens
+
+
 def train(config):
     data, model_config, fit = config.data, config.model, config.training
     kind = getattr(model_config, "type", "word2vec")
@@ -27,9 +37,7 @@ def train(config):
         raise ValueError("fasttext needs 1 <= model.min_n <= model.max_n")
 
     torch.manual_seed(fit.seed)
-    tokens = tokenize(Path(data.corpus).read_text(encoding="utf-8"))
-    if data.max_tokens > 0:
-        tokens = tokens[:data.max_tokens]
+    tokens = read_tokens(data.corpus, data.max_tokens)
     vocab = Vocabulary(tokens, data.min_count, data.max_words)
     pairs = make_pairs(vocab.encode(tokens), data.window, model_config.architecture)
     if len(vocab.words) < 3 or not pairs:

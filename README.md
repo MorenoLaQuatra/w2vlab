@@ -1,77 +1,65 @@
 # w2vlab
 
-A small PyTorch word2vec and fastText lab for the course Elaborazione del Linguaggio Naturale (NLP) at UKE. It creates word/context pairs, trains with skip-gram or CBOW, and lets you compare negative sampling with full softmax. The fastText option adds character n-grams to the input word vectors.
+A small PyTorch project for **Elaborazione del Linguaggio Naturale (NLP)** at UKE. Train word2vec or fastText on a text file, inspect the model, and try its word vectors. The code is meant to be changed in class.
 
-Run everything from the repository root. Install once:
+## Start
 
 ```bash
+git clone https://github.com/MorenoLaQuatra/word2vec-from-scratch-template.git w2vlab
+cd w2vlab
 python -m pip install -e .
 ```
 
-Every script **requires** `--config`. The linked YAML files are examples to edit and reuse; nothing is loaded implicitly. [yaml_config_manager](https://pypi.org/project/yaml-config-manager/) also accepts overrides after the config path, such as `--training.epochs 2`.
+> [!IMPORTANT]
+> Run commands from the repository root. Every script requires `--config`; flags after the config path override its YAML values. Give each training run a different `--output` name: training replaces that file if it exists.
 
-## 1. Download data and train
+## 1. Get some text
 
-[configs/download.yaml](configs/download.yaml) selects Sicilian Wikipedia (`language: scn`), the output `scnwiki.txt`, and the article limit. `articles: -1` means the full dump. For a shorter first run:
+[configs/download.yaml](configs/download.yaml) downloads Sicilian Wikipedia. Start with 1,000 articles instead of the full dump:
 
 ```bash
 python download.py --config configs/download.yaml --articles 1000
 ```
 
-[configs/train.yaml](configs/train.yaml) reads `scnwiki.txt`, uses the first 200,000 tokens (`data.max_tokens`), and trains CBOW with negative sampling for 20 epochs. It saves `vectors.pt`:
+For Italian instead:
 
 ```bash
-python train.py --config configs/train.yaml
+python download.py --config configs/download.yaml --language it --articles 10000 --output itwiki.txt
 ```
 
-Training prints an example pair, tensor shapes, progress, and loss. Rare words share `<unk>`. To compare CBOW and full softmax on a small vocabulary:
+Already have a UTF-8 text file? Skip downloading and give its path to training with `--data.corpus`. Downloads will not replace an existing file.
+
+## 2. Train your models
+
+[configs/train.yaml](configs/train.yaml) explains the settings. These quick runs use the first 20,000 tokens of `scnwiki.txt` and save separate checkpoints:
 
 ```bash
-python train.py --config configs/train.yaml --model.architecture cbow --model.loss softmax --data.max_words 1000 --output cbow.pt
+python train.py --config configs/train.yaml --data.max_tokens 20000 --training.epochs 3 --output my-scn-w2v.pt
+python train.py --config configs/train.yaml --model.type fasttext --model.architecture skipgram --data.max_tokens 20000 --training.epochs 3 --output my-scn-fasttext.pt
 ```
 
-Softmax scores every vocabulary word; negative sampling scores one true word and a few sampled words. The trainer builds pairs in memory, so keep `data.max_tokens` bounded for large dumps. Downloads do not overwrite an existing file.
+To use Italian, add `--data.corpus itwiki.txt` and choose an Italian output name. Edit the YAML to change the context window, vector size, vocabulary limit, or number of epochs. `model.loss: negative` uses a few sampled words; `softmax` scores the whole vocabulary. For a small softmax experiment, add `--model.loss softmax --data.max_words 500`.
 
-For the next lesson, train the fastText variant with the same script. This quick run uses Sicilian; add `--data.corpus itwiki.txt` when your Italian corpus is ready:
+> [!CAUTION]
+> Training builds word/context pairs in memory. Keep `data.max_tokens` limited for large corpora; `-1` uses all tokens and may exhaust RAM.
+
+## 3. Look inside and try the model
+
+[configs/model_info.yaml](configs/model_info.yaml) and [configs/inference.yaml](configs/inference.yaml) set the defaults. Use `--model` to open any checkpoint you trained; replace `my-scn-fasttext.pt` with `my-scn-w2v.pt` to compare:
 
 ```bash
-python train.py --config configs/train.yaml --model.type fasttext --model.architecture skipgram --data.max_tokens 20000 --training.epochs 3 --output fasttext.pt
+python model_info.py --config configs/model_info.yaml --model my-scn-fasttext.pt --interactive true
+python inference.py --config configs/inference.yaml --model my-scn-fasttext.pt --interactive true
 ```
 
-The [fastText subword model](https://aclanthology.org/Q17-1010/) sums a whole-word vector and character n-gram vectors. This lab keeps an explicit n-gram vocabulary instead of hashing, so you can inspect it. An unseen word gets a vector only when it shares learned n-grams; W2 and the training loss are unchanged.
-
-## 2. Explore the vectors
-
-[configs/inference.yaml](configs/inference.yaml) chooses the saved model, query word, and number of neighbors. For nearest words:
-
-```bash
-python inference.py --config configs/inference.yaml
-```
-
-For an interactive prompt, run `python inference.py --config configs/inference.yaml --interactive true`. Try `similar palermu`, `similarity palermu missina`, `analogy A B C`, or `quit`. Word2vec reports an unseen word as OOV; fastText can build its vector from shared n-grams. Try `python inference.py --config configs/inference.yaml --model fasttext.pt --word ennaaaa`.
-
-## 3. Inspect the model in class
-
-[configs/model_info.yaml](configs/model_info.yaml) chooses the checkpoint. These commands show the model tables, the shape of each step, and the word/ID mapping:
-
-```bash
-python model_info.py --config configs/model_info.yaml
-python model_info.py --config configs/model_info.yaml --command shapes
-python model_info.py --config configs/model_info.yaml --command 'word enna'
-```
-
-See [course-utils.md](course-utils.md) for more copy-paste commands and the interactive mode. New checkpoints include both W1 and W2; older `vectors.pt` files still work for word lookup but need retraining to show W2 and the training path.
-
-With `fasttext.pt`, try `python model_info.py --config configs/model_info.yaml --model fasttext.pt --command 'ngrams ennaaaa'` to see the pieces of an OOV word.
+At the **model-info** prompt, try `summary`, `shapes`, `vocab 10`, `word enna`, `id 0`, `weights enna`, and `quit`. FastText also has `ngrams ennaaaa`: an unseen word can get a vector from character pieces it shares with known words. At the **inference** prompt, try `similar enna`, `similarity enna palermu`, `analogy A B C`, and `quit`.
 
 ## 4. Plot a few words
 
-[configs/visualize.yaml](configs/visualize.yaml) chooses seed words, how many neighbors to include, and the PNG filename:
+[configs/visualize.yaml](configs/visualize.yaml) makes a simple 2-D PCA plot:
 
 ```bash
-python visualize.py --config configs/visualize.yaml
+python visualize.py --config configs/visualize.yaml --model my-scn-fasttext.pt --words enna --output my-scn-plot.png
 ```
 
-The plot uses PCA to show the selected word vectors in two dimensions; orange points are seed words, blue points are neighbors. It is a small visual aid, not a full view of the embedding space.
-
-To change the lesson code, start with `src/w2vlab/data.py` (vocabulary and pairs), `src/w2vlab/model.py` (embeddings and losses), and `train.py` (updates).
+To change the lesson code, start with [data.py](src/w2vlab/data.py) (words and pairs), [model.py](src/w2vlab/model.py) (embeddings and losses), and [train.py](train.py) (training loop). More live examples are in [course-utils.md](course-utils.md).
