@@ -1,4 +1,4 @@
-"""The two embedding tables and the two word2vec objectives."""
+"""Word2vec objectives, with an optional fastText subword table."""
 
 from torch import nn
 from torch.nn import functional as F
@@ -11,13 +11,13 @@ class Word2Vec(nn.Module):
         if architecture not in ("skipgram", "cbow"):
             raise ValueError("architecture must be skipgram or cbow")
         self.architecture = architecture
-        self.input = nn.Embedding(vocab_size, dimensions)   # W1: saved word vectors
+        self.input = nn.Embedding(vocab_size, dimensions)   # W1: whole-word input vectors
         self.output = nn.Embedding(vocab_size, dimensions)  # W2: training targets
         nn.init.uniform_(self.input.weight, -0.5 / dimensions, 0.5 / dimensions)
         nn.init.zeros_(self.output.weight)
 
     def forward(self, source, target, negatives=None):
-        hidden = self.input(source)
+        hidden = self.embed(source)
         if self.architecture == "cbow":
             hidden = hidden.mean(dim=1)
 
@@ -28,6 +28,25 @@ class Word2Vec(nn.Module):
         positive = (hidden * self.output(target)).sum(dim=1)
         negative = (hidden[:, None, :] * self.output(negatives)).sum(dim=2)
         return -(F.logsigmoid(positive) + F.logsigmoid(-negative).sum(dim=1)).mean()
+
+    def embed(self, source):
+        return self.input(source)
+
+
+class FastText(Word2Vec):
+    def __init__(self, vocab_size, subword_ids, subword_size, dimensions=50,
+                 architecture="skipgram"):
+        super().__init__(vocab_size, dimensions, architecture)
+        self.register_buffer("subword_ids", torch.tensor(subword_ids))
+        self.subword = nn.EmbeddingBag(subword_size, dimensions, mode="sum", padding_idx=0)
+        nn.init.uniform_(self.subword.weight, -0.5 / dimensions, 0.5 / dimensions)
+        with torch.no_grad():
+            self.subword.weight[0].zero_()  # padding is not a character n-gram
+
+    def embed(self, source):
+        ids = self.subword_ids[source]
+        pieces = self.subword(ids.reshape(-1, ids.shape[-1]))
+        return self.input(source) + pieces.reshape(*source.shape, -1)
 
 
 class NegativeSampler:

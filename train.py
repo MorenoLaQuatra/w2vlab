@@ -1,4 +1,4 @@
-"""Train word2vec with an explicit YAML config."""
+"""Train word2vec or fastText with an explicit YAML config."""
 
 import sys
 import time
@@ -8,18 +8,23 @@ import torch
 from torch.utils.data import DataLoader
 from yaml_config_manager import load_config
 
-from w2vlab.data import Vocabulary, make_pairs, tokenize
-from w2vlab.model import NegativeSampler, Word2Vec
+from w2vlab.data import Subwords, Vocabulary, make_pairs, tokenize
+from w2vlab.model import FastText, NegativeSampler, Word2Vec
 
 
 def train(config):
     data, model_config, fit = config.data, config.model, config.training
+    kind = getattr(model_config, "type", "word2vec")
+    if kind not in ("word2vec", "fasttext"):
+        raise ValueError("model.type must be word2vec or fasttext")
     if model_config.loss not in ("negative", "softmax"):
         raise ValueError("model.loss must be negative or softmax")
     sizes = (data.window, data.min_count, data.max_words, model_config.dimensions,
              model_config.negatives, fit.epochs, fit.batch_size)
     if min(sizes) < 1 or fit.lr <= 0 or data.max_tokens == 0 or data.max_tokens < -1:
         raise ValueError("sizes and learning rate must be positive; max_tokens may be -1")
+    if kind == "fasttext" and not 1 <= model_config.min_n <= model_config.max_n:
+        raise ValueError("fasttext needs 1 <= model.min_n <= model.max_n")
 
     torch.manual_seed(fit.seed)
     tokens = tokenize(Path(data.corpus).read_text(encoding="utf-8"))
@@ -30,7 +35,12 @@ def train(config):
     if len(vocab.words) < 3 or not pairs:
         raise ValueError("corpus is too small; try more text or lower data.min_count")
 
-    model = Word2Vec(len(vocab.words), model_config.dimensions, model_config.architecture)
+    subwords = (Subwords(vocab.words, model_config.min_n, model_config.max_n)
+                if kind == "fasttext" else None)
+    model = (FastText(len(vocab.words), subwords.ids, len(subwords.grams),
+                      model_config.dimensions, model_config.architecture)
+             if subwords else Word2Vec(len(vocab.words), model_config.dimensions,
+                                       model_config.architecture))
     sampler = NegativeSampler(vocab.counts) if model_config.loss == "negative" else None
     loader = DataLoader(pairs, batch_size=fit.batch_size, shuffle=True)
     optimizer = torch.optim.Adam(model.parameters(), lr=fit.lr)
@@ -38,8 +48,12 @@ def train(config):
     source, target = pairs[0]
     example = ([vocab.words[i] for i in source] if model_config.architecture == "cbow"
                else vocab.words[source])
-    print(f"{model_config.architecture} / {model_config.loss}: {len(tokens)} tokens, "
+    print(f"{kind} / {model_config.architecture} / {model_config.loss}: {len(tokens)} tokens, "
           f"{len(vocab.words)} words, {len(pairs)} examples")
+    if subwords:
+        print(f"G character n-grams: {(len(subwords.grams), model_config.dimensions)} "
+              f"(including padding); "
+              f"padded pieces per word: {subwords.width}")
     print(f"Example: {example} -> {vocab.words[target]}")
     print(f"W1 input and W2 output: {tuple(model.input.weight.shape)} each")
 
@@ -72,7 +86,26 @@ def train(config):
         print(f"epoch {epoch + 1}: loss {total / len(pairs):.3f} "
               f"({time.perf_counter() - started:.1f}s)")
 
-    torch.save({"words": vocab.words, "vectors": model.input.weight.detach()}, config.output)
+    with torch.no_grad():
+        vectors = torch.cat([model.embed(torch.arange(i, min(i + 512, len(vocab.words))))
+                             for i in range(0, len(vocab.words), 512)])
+    saved = {
+        "words": vocab.words,
+        "counts": vocab.counts,
+        "vectors": vectors,  # W1 for word2vec; W1 + G for fasttext
+        "output_vectors": model.output.weight.detach(),  # W2: used during training
+        "model_type": kind,
+        "architecture": model_config.architecture,
+        "loss": model_config.loss,
+        "window": data.window,
+        "negatives": model_config.negatives,
+    }
+    if subwords:
+        saved.update({"input_vectors": model.input.weight.detach(),
+                      "subword_vectors": model.subword.weight.detach(),
+                      "subwords": subwords.grams, "min_n": model_config.min_n,
+                      "max_n": model_config.max_n, "max_subwords": subwords.width})
+    torch.save(saved, config.output)
     print(f"Saved {config.output}")
 
 

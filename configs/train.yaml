@@ -6,10 +6,13 @@ data:
   window: 2
 
 model:
+  type: word2vec # word2vec or fasttext
   architecture: cbow # skipgram or cbow
   dimensions: 25
   loss: negative # negative or softmax
   negatives: 10
+  min_n: 3 # fasttext character n-grams
+  max_n: 6
 
 training:
   epochs: 20

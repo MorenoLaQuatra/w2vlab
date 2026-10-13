@@ -1,0 +1,3 @@
+model: vectors.pt
+command: summary          # e.g. shapes, vocab 10, ngrams palermu
+interactive: false        # true: keep asking questions without reloading

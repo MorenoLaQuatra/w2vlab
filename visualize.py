@@ -17,16 +17,20 @@ def main():
 
     config = load_config()
     vectors = WordVectors(config.model)
-    anchors = [vectors.words[vectors.index(word)] for word in config.words]
+    chosen = [config.words] if isinstance(config.words, str) else config.words
+    anchors = [word.lower() for word in chosen]
+    for word in anchors:
+        vectors.vector(word)  # An OOV word is valid when fastText knows some of its n-grams.
     words = list(anchors)
-    for word in config.words:
+    for word in anchors:
         words.extend(name for name, _ in vectors.most_similar(word, config.neighbors))
     words = list(dict.fromkeys(words))
     anchor_set = set(anchors)
     if len(words) < 2:
         raise ValueError("choose at least two words")
 
-    matrix = torch.stack([vectors.unit[vectors.index(word)] for word in words])
+    matrix = torch.stack([torch.nn.functional.normalize(vectors.vector(word), dim=0)
+                          for word in words])
     centered = matrix - matrix.mean(dim=0)
     u, s, _ = torch.linalg.svd(centered, full_matrices=False)
     points = u[:, :2] * s[:2]  # PCA of the selected word vectors
