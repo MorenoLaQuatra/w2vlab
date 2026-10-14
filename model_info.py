@@ -2,9 +2,9 @@
 
 import sys
 
-import torch
 from yaml_config_manager import load_config
 from w2vlab.data import char_ngrams
+from w2vlab.vectors import load_saved
 
 
 def summary(saved):
@@ -147,7 +147,11 @@ def main():
     if not any(arg == "--config" or arg.startswith("--config=") for arg in sys.argv[1:]):
         raise SystemExit("Error: --config is required. Example: python model_info.py --config configs/model_info.yaml")
     config = load_config()
-    saved = torch.load(config.model, map_location="cpu", weights_only=True)
+    saved = load_saved(config.model)
+    if "checkpoint_progress" in saved:
+        epoch, seen, examples = saved["checkpoint_progress"]
+        print(f"Training checkpoint: {epoch} epochs complete, "
+              f"{seen:,}/{examples:,} examples in the next epoch")
     to_id = {word: i for i, word in enumerate(saved["words"])}
     gram_to_id = ({gram: i for i, gram in enumerate(saved["subwords"])}
                   if "subwords" in saved else None)

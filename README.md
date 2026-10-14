@@ -10,6 +10,8 @@ cd w2vlab
 python -m pip install -e .
 ```
 
+If you already cloned the repository, run `git pull` and `python -m pip install -e .` to use the current code.
+
 > [!IMPORTANT]
 > Run commands from the repository root. Every script requires `--config`; flags after the config path override its YAML values. Give each training run a different `--output` name: training replaces that file if it exists.
 
@@ -40,8 +42,18 @@ python train.py --config configs/train.yaml --model.type fasttext --model.archit
 
 To use Italian, add `--data.corpus itwiki.txt` and choose an Italian output name. Edit the YAML to change the context window, vector size, vocabulary limit, or number of epochs. `model.loss: negative` uses a few sampled words; `softmax` scores the whole vocabulary. For a small softmax experiment, add `--model.loss softmax --data.max_words 500`.
 
-> [!CAUTION]
-> Training builds word/context pairs in memory. Keep `data.max_tokens` limited for large corpora; `-1` uses all tokens and may exhaust RAM.
+For the full Italian dump, use `-1` and start with one epoch:
+
+```bash
+python train.py --config configs/train.yaml --data.corpus itwiki.txt --data.max_tokens -1 --model.type fasttext --training.epochs 1 --output it-fasttext-full.pt
+```
+
+> [!NOTE]
+> Training reads the corpus in passes: one for vocabulary counts, then one per epoch. Context windows stop at article boundaries. RAM holds a counting chunk, the vocabulary/subword tables, and a small training buffer—not the full corpus. Exact word counting uses a temporary SQLite file and needs free disk space. A full Wikipedia run can still take many hours.
+
+Training prints its device (`cuda`, `mps`, or `cpu`), vocabulary coverage, model shapes, loss, speed, and ETA. [configs/train.yaml](configs/train.yaml) controls how often progress appears. It saves to `it-fasttext-full.checkpoint.pt` every 10 million examples and after each epoch. To continue, rerun the same command with `--training.resume it-fasttext-full.checkpoint.pt`. Keep the corpus and training settings unchanged; you may increase `--training.epochs`. Resume skips earlier examples without retraining them, but must reread that part of the file. You can also inspect a checkpoint while training continues; the finished `.pt` is smaller.
+
+If many tokens become `<unk>`, raise `data.max_words` for a **new** run; changing it prevents resuming an existing checkpoint.
 
 ## 3. Look inside and try the model
 
@@ -51,6 +63,8 @@ To use Italian, add `--data.corpus itwiki.txt` and choose an Italian output name
 python model_info.py --config configs/model_info.yaml --model my-scn-fasttext.pt --interactive true
 python inference.py --config configs/inference.yaml --model my-scn-fasttext.pt --interactive true
 ```
+
+To inspect an unfinished run, use its `.checkpoint.pt` file in either command, for example `--model it-fasttext-full.checkpoint.pt`.
 
 At the **model-info** prompt, try `summary`, `shapes`, `vocab 10`, `word enna`, `id 0`, `weights enna`, and `quit`. FastText also has `ngrams ennaaaa`: an unseen word can get a vector from character pieces it shares with known words. At the **inference** prompt, try `similar enna`, `similarity enna palermu`, `analogy A B C`, and `quit`.
 

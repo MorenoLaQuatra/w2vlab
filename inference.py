@@ -16,6 +16,10 @@ def main():
         raise SystemExit("Error: --config is required. Example: python inference.py --config configs/inference.yaml")
     config = load_config()
     vectors = WordVectors(config.model)
+    if vectors.checkpoint_progress is not None:
+        epoch, seen, examples = vectors.checkpoint_progress
+        print(f"Training checkpoint: {epoch} epochs complete, "
+              f"{seen:,}/{examples:,} examples in the next epoch")
     if not config.interactive:
         try:
             show(vectors.most_similar(config.word, config.top))

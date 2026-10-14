@@ -1,6 +1,6 @@
 data:
   corpus: scnwiki.txt
-  max_tokens: -1  # -1 = all; use a positive limit for large dumps
+  max_tokens: -1  # -1 = all tokens; full dumps take much longer
   min_count: 3
   max_words: 20000
   window: 4
@@ -15,8 +15,13 @@ model:
   max_n: 6
 
 training:
-  epochs: 20
+  epochs: 10
   batch_size: 1024
+  shuffle_buffer: 10000  # shuffle a small window, not the whole corpus
+  device: auto            # cuda -> mps -> cpu; or choose one explicitly
+  checkpoint_every: 10000000  # examples between resumable saves
+  progress_seconds: 5      # live loss, speed, and ETA
+  resume: ""              # path to a .checkpoint.pt file, if continuing
   lr: 0.005
   seed: 1
 
