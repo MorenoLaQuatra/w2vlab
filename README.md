@@ -5,7 +5,7 @@ A small PyTorch project for **Elaborazione del Linguaggio Naturale (NLP)** at UK
 ## Start
 
 ```bash
-git clone https://github.com/MorenoLaQuatra/word2vec-from-scratch-template.git w2vlab
+git clone https://github.com/MorenoLaQuatra/w2vlab.git
 cd w2vlab
 python -m pip install -e .
 ```
